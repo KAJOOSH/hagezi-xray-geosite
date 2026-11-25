@@ -1,0 +1,5 @@
+{
+  "type": "field",
+  "domain": ["ext:hagezi-tif.dat:tif-medium"],
+  "outboundTag": "BLOCK"
+}

@@ -1,0 +1,11 @@
+{
+  "geodata": {
+    "cron": "17 5 * * *",
+    "assets": [
+      {
+        "url": "https://raw.githubusercontent.com/KAJOOSH/hagezi-xray-geosite/generated/hagezi-tif.dat",
+        "file": "hagezi-tif.dat"
+      }
+    ]
+  }
+}
