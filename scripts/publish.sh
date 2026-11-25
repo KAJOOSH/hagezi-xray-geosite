@@ -94,7 +94,7 @@ if release=$(gh release view "$version" --repo "$GITHUB_REPOSITORY" --json isDra
     fi
 else
     readme_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/$generator_commit/README.md"
-    packages_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/$generator_commit/docs/PACKAGES.md"
+    packages_url="$readme_url#packages"
     notes=$(printf 'زمان ساخت به وقت UTC `%s`.\n\n[راهنمای استفاده در Xray](%s) · [فهرست بسته‌ها و راهنمای انتخاب](%s)\n' "$built_at" "$readme_url" "$packages_url")
     gh release create "$version" "${assets[@]}" --repo "$GITHUB_REPOSITORY" \
         --target "$generator_commit" --latest --title "HaGeZi GeoSite and GeoIP $version" --notes "$notes"
