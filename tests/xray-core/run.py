@@ -193,15 +193,19 @@ def exercise_routing(lab, assets, report):
 
     (assets / "truncated.dat").write_bytes(b"\x0a\x05\x0a")
     (assets / "empty.dat").write_bytes(b"")
-    for title, asset, tag, marker in (
-        ("Missing data file", "missing.dat", "deny", "missing.dat"),
-        ("Unknown category", filename, "not-present", "not-present"),
-        ("Truncated data", "truncated.dat", "deny", "truncated.dat"),
-        ("Empty data", "empty.dat", "deny", "empty.dat"),
+    for label, kind, valid_asset, valid_tag in (
+        ("GeoSite", "domain", filename, "deny"),
+        ("GeoIP", "ip", ip_filename, "ranges"),
     ):
-        report.case(title, lambda: lab.reject_config(
-            f"invalid-{asset}", [routing_rule("domain", asset, tag, "BLOCK")], assets, marker,
-        ))
+        for title, asset, tag, marker in (
+            ("missing file", "missing.dat", valid_tag, "missing.dat"),
+            ("unknown category", valid_asset, "not-present", "not-present"),
+            ("truncated data", "truncated.dat", valid_tag, "truncated.dat"),
+            ("empty data", "empty.dat", valid_tag, "empty.dat"),
+        ):
+            report.case(f"{label} {title}", lambda: lab.reject_config(
+                f"invalid-{kind}-{asset}", [routing_rule(kind, asset, tag, "BLOCK")], assets, marker,
+            ))
 
 
 def run(args, report):
