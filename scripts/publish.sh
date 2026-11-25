@@ -24,6 +24,7 @@ fi
 xray_version=$(jq -er '.xray_version' "$report_file")
 
 (cd "$artifact_dir" && sha256sum --check checksums.sha256)
+python3 -B scripts/bundle.py "$artifact_dir" "$artifact_dir"
 
 gh auth setup-git --hostname github.com
 if git ls-remote --exit-code origin "$ref" >/dev/null; then
@@ -87,7 +88,8 @@ fi
 
 asset_names=$(jq -er '.packages[].asset' "$manifest")
 assets=("$publish_dir/manifest.json" "$publish_dir/LICENSE" "$artifact_dir/checksums.sha256"
-    "$artifact_dir/sources.zip" "$publish_dir/hagezi-tif.dat.sha256" "$publish_dir/source-tif-medium.txt")
+    "$artifact_dir/sources.zip" "$publish_dir/hagezi-tif.dat.sha256" "$publish_dir/source-tif-medium.txt"
+    "$artifact_dir/xray-assets.tar.gz" "$artifact_dir/xray-assets.tar.gz.sha256")
 while IFS= read -r file; do
     assets+=("$artifact_dir/$file")
 done <<< "$asset_names"

@@ -18,7 +18,7 @@ Choose what to block and copy the matching rule. [فارسی](README.fa.md)
 
 ## Use a package
 
-1. Download a file below and put it next to `geosite.dat` in Xray’s assets folder.
+1. Download a file below and put it next to `geosite.dat` in Xray’s assets folder. To get all Xray files together, [download the archive](https://github.com/KAJOOSH/hagezi-xray-geosite/releases/latest/download/xray-assets.tar.gz) and extract its `.dat` files into that folder.
 2. Add its rule to `routing.rules` before any catch-all rule. Separate entries with commas, save and reload Xray.
 
 Use your blocking tag in place of `BLOCK`. If you need one, append `{"tag":"BLOCK","protocol":"blackhole"}` to `outbounds`.
