@@ -1,26 +1,35 @@
 # HaGeZi blocklists for Xray
 
-[فارسی](README.fa.md)
+Choose what to block and copy the matching rule. [فارسی](README.fa.md)
 
-[Download TIF Medium](https://github.com/KAJOOSH/hagezi-xray-geosite/releases/latest/download/hagezi-tif.dat) · [All releases](https://github.com/KAJOOSH/hagezi-xray-geosite/releases)
+## Choose a package
+
+**Start with TIF Medium** for everyday security. Add **TIF IPv4** to block listed IP addresses. Add **Multi Pro** if you also want to filter ads and trackers.
+
+| Family | What it covers | When to use it |
+| --- | --- | --- |
+| **TIF Mini, Medium, Full** | Malware, phishing and command-and-control domains | Use Mini if memory is tight, Medium for everyday protection, or Full for wider coverage. Pick one size. |
+| **TIF IPv4** | Listed threat IPv4 addresses | Add it when traffic can connect straight to an IP. A listed IP can be shared with legitimate services. |
+| **Fake** | Scam sites and impersonation | Use it for targeted scam filtering. It overlaps with TIF. |
+| **DynDNS, Badware Hoster, high-risk domain endings** | Infrastructure frequently abused for scams or malware | Use selectively. Broad rules can block legitimate sites on the same host or domain ending. |
+| **Multi, device trackers, pop-ups, referrals** | Ads and tracking, plus some threat coverage in Multi | Use for privacy and ad filtering. Pick one Multi edition. |
+| **NRD and DGA** | Newly registered domains. DGA is the narrower list. | Use for stricter filtering if you can allowlist legitimate new sites. Choose NRD or DGA. |
+| **DNS, VPN and content lists** | DNS services, proxies and selected site categories | Use when you have a specific filtering policy. |
 
 ## Use a package
 
-1. Pick a package below and put its downloaded file in Xray’s assets folder, next to `geosite.dat`.
-2. Add the package’s rule to `routing.rules`, before any catch-all rule. Separate entries with commas.
-3. Save the configuration and reload Xray.
+1. Download a file below and put it next to `geosite.dat` in Xray’s assets folder.
+2. Add its rule to `routing.rules` before any catch-all rule. Separate entries with commas, save and reload Xray.
 
-If your blocking outbound has another tag, use it in place of `BLOCK`. If you need a blocking outbound, add `{"tag":"BLOCK","protocol":"blackhole"}` at the end of `outbounds`.
+Use your blocking tag in place of `BLOCK`. If you need one, append `{"tag":"BLOCK","protocol":"blackhole"}` to `outbounds`.
 
-For an exception, replace `DIRECT` with the outbound you normally use if its tag differs. Put the exception above its matching block rule and below any other security rules you want to keep in effect. Xray applies the first matching rule.
+For an exception, use your normal outbound in place of `DIRECT` if needed. Put the exception above its block rule and below unrelated security rules.
 
 ## Packages
 
 <details>
 
 <summary>Security</summary>
-
-Choose one TIF size. You can add the IPv4 list alongside it.
 
 **TIF Medium** · [Download](https://github.com/KAJOOSH/hagezi-xray-geosite/releases/latest/download/hagezi-tif.dat)
 
