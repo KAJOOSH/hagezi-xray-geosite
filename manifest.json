@@ -1,0 +1,10 @@
+{
+  "source_url": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif.medium-onlydomains.txt",
+  "source_version": "2026.1124.2304.03",
+  "source_sha256": "66ecfbb4187da46b16542061b6b4e4b042a9032f2f5b71d7379af46c181ba833",
+  "license": "GPL-3.0-only",
+  "asset": "hagezi-tif.dat",
+  "asset_sha256": "3d520867d347c6d0ccc58c2a4b3f6af3fc1853ee247811be884c68c6d45dbe64",
+  "category": "tif-medium",
+  "domain_count": 232157
+}
