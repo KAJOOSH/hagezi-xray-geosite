@@ -9,6 +9,8 @@ ref="refs/heads/$branch"
 publish_dir=$(mktemp -d)
 trap 'git worktree remove --force "$publish_dir" >/dev/null 2>&1 || rmdir "$publish_dir"' EXIT
 
+(cd "$artifact_dir" && sha256sum --check checksums.sha256)
+
 gh auth setup-git --hostname github.com
 if git ls-remote --exit-code origin "$ref" >/dev/null; then
     git fetch --no-tags --depth=1 origin "$ref"
@@ -27,8 +29,8 @@ manifest="$publish_dir/manifest.json"
 new_snapshot=false
 if [[ -f "$manifest" ]] && jq -e --slurpfile candidate "$artifact_dir/manifest.json" '
     (.version | type == "string")
-    and .source_sha256 == $candidate[0].source_sha256
-    and .asset_sha256 == $candidate[0].asset_sha256
+    and (.packages | type == "array")
+    and .packages == $candidate[0].packages
 ' "$manifest" >/dev/null; then
     echo 'The generated branch already contains this version.'
 else
@@ -69,22 +71,31 @@ if [[ "$new_snapshot" == true ]]; then
     git -C "$publish_dir" push origin "HEAD:$ref"
 fi
 
-assets=()
-for file in "${files[@]}"; do
-    assets+=("$publish_dir/$file")
-done
+asset_names=$(jq -er '.packages[].asset' "$manifest")
+assets=("$publish_dir/manifest.json" "$publish_dir/LICENSE" "$artifact_dir/checksums.sha256"
+    "$artifact_dir/sources.zip" "$publish_dir/hagezi-tif.dat.sha256" "$publish_dir/source-tif-medium.txt")
+while IFS= read -r file; do
+    assets+=("$artifact_dir/$file")
+done <<< "$asset_names"
 
 if release=$(gh release view "$version" --repo "$GITHUB_REPOSITORY" --json isDraft,assets,url 2>/dev/null); then
     if [[ $(jq -r '.isDraft' <<< "$release") == true ]]; then
         gh release upload "$version" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber
         gh release edit "$version" --repo "$GITHUB_REPOSITORY" --draft=false --latest
     else
-        jq -e 'any(.assets[]; .name == "hagezi-tif.dat")' <<< "$release" >/dev/null
+        for asset in "${assets[@]}"; do
+            file=${asset##*/}
+            if ! jq -e --arg file "$file" 'any(.assets[]; .name == $file)' <<< "$release" >/dev/null; then
+                printf 'Missing asset %s in published release %s\n' "$file" "$version" >&2
+                exit 1
+            fi
+        done
         printf 'Release %s already published: %s\n' "$version" "$(jq -r '.url' <<< "$release")"
     fi
 else
     readme_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/$generator_commit/README.md"
-    notes=$(printf 'زمان ساخت به وقت UTC `%s`.\n\n[راهنمای استفاده در Xray](%s)\n' "$built_at" "$readme_url")
+    packages_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/$generator_commit/docs/PACKAGES.md"
+    notes=$(printf 'زمان ساخت به وقت UTC `%s`.\n\n[راهنمای استفاده در Xray](%s) · [فهرست بسته‌ها و راهنمای انتخاب](%s)\n' "$built_at" "$readme_url" "$packages_url")
     gh release create "$version" "${assets[@]}" --repo "$GITHUB_REPOSITORY" \
-        --target "$generator_commit" --latest --title "HaGeZi TIF Medium $version" --notes "$notes"
+        --target "$generator_commit" --latest --title "HaGeZi GeoSite and GeoIP $version" --notes "$notes"
 fi

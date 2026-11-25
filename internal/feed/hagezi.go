@@ -16,43 +16,59 @@ import (
 	"time"
 )
 
-const (
-	SourceURL = "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif.medium-onlydomains.txt"
-	maxBytes  = 16 << 20
-)
+const maxBytes = 128 << 20
 
 type Snapshot struct {
 	Raw     []byte
 	Version string
-	Domains []string
+	Entries []string
 }
 
-func Download(ctx context.Context) (Snapshot, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, SourceURL, nil)
-	if err != nil {
-		return Snapshot{}, err
+func Download(ctx context.Context, client *http.Client, p Package) (Snapshot, error) {
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		var raw []byte
+		raw, err = download(ctx, client, p.SourceURL)
+		if err == nil {
+			return parse(raw, p)
+		}
+		if attempt == 2 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return Snapshot{}, ctx.Err()
+		case <-time.After(time.Duration(attempt+1) * time.Second):
+		}
 	}
-	client := &http.Client{Timeout: 45 * time.Second}
+	return Snapshot{}, err
+}
+
+func download(ctx context.Context, client *http.Client, url string) ([]byte, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
 	response, err := client.Do(request)
 	if err != nil {
-		return Snapshot{}, fmt.Errorf("download HaGeZi feed: %w", err)
+		return nil, fmt.Errorf("download HaGeZi feed: %w", err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return Snapshot{}, fmt.Errorf("download HaGeZi feed: HTTP %s", response.Status)
+		return nil, fmt.Errorf("download HaGeZi feed: HTTP %s", response.Status)
 	}
 
 	raw, err := io.ReadAll(io.LimitReader(response.Body, maxBytes+1))
 	if err != nil {
-		return Snapshot{}, fmt.Errorf("read HaGeZi feed: %w", err)
+		return nil, fmt.Errorf("read HaGeZi feed: %w", err)
 	}
 	if len(raw) > maxBytes {
-		return Snapshot{}, fmt.Errorf("HaGeZi feed exceeds %d bytes", maxBytes)
+		return nil, fmt.Errorf("HaGeZi feed exceeds %d bytes", maxBytes)
 	}
-	return parse(raw)
+	return raw, nil
 }
 
-func parse(raw []byte) (Snapshot, error) {
+func parse(raw []byte, p Package) (Snapshot, error) {
 	snapshot := Snapshot{Raw: raw}
 	declaredCount := 0
 	scanner := bufio.NewScanner(bytes.NewReader(bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf"))))
@@ -69,31 +85,52 @@ func parse(raw []byte) (Snapshot, error) {
 				return Snapshot{}, fmt.Errorf("invalid feed entry count on line %d", lineNumber)
 			}
 			declaredCount = count
+			snapshot.Entries = make([]string, 0, min(count, len(raw)/3))
 		case strings.HasPrefix(line, "#"):
 			continue
 		default:
-			domain := strings.ToLower(line)
-			if !validDomain(domain) {
-				return Snapshot{}, fmt.Errorf("invalid domain rule on line %d", lineNumber)
+			entry, err := normalize(line, p)
+			if err != nil {
+				return Snapshot{}, fmt.Errorf("line %d: %w", lineNumber, err)
 			}
-			snapshot.Domains = append(snapshot.Domains, domain)
+			snapshot.Entries = append(snapshot.Entries, entry)
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return Snapshot{}, fmt.Errorf("scan HaGeZi feed: %w", err)
 	}
-	if snapshot.Version == "" || declaredCount == 0 || len(snapshot.Domains) != declaredCount {
-		return Snapshot{}, fmt.Errorf("incomplete HaGeZi feed: version %q, read %d of %d domains",
-			snapshot.Version, len(snapshot.Domains), declaredCount)
+	if len(snapshot.Entries) == 0 ||
+		(p.RequireCount && (declaredCount == 0 || snapshot.Version == "")) ||
+		(declaredCount != 0 && len(snapshot.Entries) != declaredCount) {
+		return Snapshot{}, fmt.Errorf("incomplete HaGeZi feed: version %q, read %d of %d entries",
+			snapshot.Version, len(snapshot.Entries), declaredCount)
 	}
 
-	slices.Sort(snapshot.Domains)
-	snapshot.Domains = slices.Compact(snapshot.Domains)
+	slices.Sort(snapshot.Entries)
+	snapshot.Entries = slices.Compact(snapshot.Entries)
 	return snapshot, nil
 }
 
-func validDomain(domain string) bool {
-	if len(domain) > 253 || !strings.Contains(domain, ".") {
+func normalize(line string, p Package) (string, error) {
+	if p.Kind == IP {
+		if addr, err := netip.ParseAddr(line); err == nil && addr.Zone() == "" {
+			return netip.PrefixFrom(addr, addr.BitLen()).String(), nil
+		}
+		if prefix, err := netip.ParsePrefix(line); err == nil {
+			return prefix.Masked().String(), nil
+		}
+		return "", fmt.Errorf("invalid IP rule")
+	}
+
+	domain := strings.ToLower(strings.TrimSuffix(line, "."))
+	if !validDomain(domain, p.AllowTLD) {
+		return "", fmt.Errorf("invalid domain rule")
+	}
+	return domain, nil
+}
+
+func validDomain(domain string, allowTLD bool) bool {
+	if len(domain) > 253 || (!allowTLD && !strings.Contains(domain, ".")) {
 		return false
 	}
 	if _, err := netip.ParseAddr(domain); err == nil {
@@ -105,7 +142,7 @@ func validDomain(domain string) bool {
 		}
 		for i := range len(label) {
 			ch := label[i]
-			if (ch < 'a' || ch > 'z') && (ch < '0' || ch > '9') && ch != '-' {
+			if (ch < 'a' || ch > 'z') && (ch < '0' || ch > '9') && ch != '-' && ch != '_' {
 				return false
 			}
 		}

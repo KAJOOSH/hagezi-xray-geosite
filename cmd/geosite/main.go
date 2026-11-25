@@ -3,36 +3,49 @@
 package main
 
 import (
+	"archive/zip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"hagezi-xray-geosite/internal/feed"
 	"hagezi-xray-geosite/internal/geosite"
 )
 
-const sourceFilename = "source-tif-medium.txt"
+const sourceArchive = "sources.zip"
+
+type packageManifest struct {
+	Category      string `json:"category"`
+	Kind          string `json:"kind"`
+	Policy        string `json:"policy"`
+	Asset         string `json:"asset"`
+	AssetSHA256   string `json:"asset_sha256"`
+	SourceFile    string `json:"source_file"`
+	SourceURL     string `json:"source_url"`
+	SourceVersion string `json:"source_version,omitempty"`
+	SourceSHA256  string `json:"source_sha256"`
+	EntryCount    int    `json:"entry_count"`
+}
 
 type manifest struct {
 	Version         string `json:"version"`
 	BuiltAt         string `json:"built_at"`
 	GeneratorCommit string `json:"generator_commit,omitempty"`
-	SourceURL       string `json:"source_url"`
-	SourceVersion   string `json:"source_version"`
-	SourceSHA256    string `json:"source_sha256"`
 	License         string `json:"license"`
-	Asset           string `json:"asset"`
-	AssetSHA256     string `json:"asset_sha256"`
-	Category        string `json:"category"`
 	DomainCount     int    `json:"domain_count"`
+	packageManifest
+	Packages []packageManifest `json:"packages"`
 }
 
 func main() {
@@ -50,60 +63,147 @@ func main() {
 }
 
 func generate(ctx context.Context, outputDir string) error {
-	snapshot, err := feed.Download(ctx)
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		return err
+	}
+	stagingDir, err := os.MkdirTemp(outputDir, ".build-*")
 	if err != nil {
 		return err
 	}
-	asset, err := geosite.Encode(snapshot.Domains)
-	if err != nil {
-		return fmt.Errorf("encode GeoSite: %w", err)
+	defer os.RemoveAll(stagingDir)
+	if err := build(ctx, stagingDir); err != nil {
+		return err
 	}
 
-	assetHash := sha256.Sum256(asset)
-	sourceHash := sha256.Sum256(snapshot.Raw)
+	entries, err := os.ReadDir(stagingDir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.Name() == "manifest.json" {
+			continue
+		}
+		if err := os.Rename(filepath.Join(stagingDir, entry.Name()), filepath.Join(outputDir, entry.Name())); err != nil {
+			return err
+		}
+	}
+	return os.Rename(filepath.Join(stagingDir, "manifest.json"), filepath.Join(outputDir, "manifest.json"))
+}
+
+func build(ctx context.Context, outputDir string) error {
+	tempArchive, err := os.CreateTemp(outputDir, ".sources-*.zip")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tempArchive.Name())
+	defer tempArchive.Close()
+
+	archiveHash := sha256.New()
+	sources := zip.NewWriter(io.MultiWriter(tempArchive, archiveHash))
+	client := &http.Client{Timeout: 3 * time.Minute}
+	defer client.CloseIdleConnections()
+
+	var info manifest
+	var checksums strings.Builder
+	for _, p := range feed.Packages() {
+		entry, err := buildPackage(ctx, client, p, outputDir, sources)
+		if err != nil {
+			return fmt.Errorf("%s: %w", p.Tag, err)
+		}
+		fmt.Fprintf(&checksums, "%s  %s\n", entry.AssetSHA256, entry.Asset)
+		info.Packages = append(info.Packages, entry)
+		if p.Tag == feed.MediumTag {
+			info.packageManifest = entry
+			info.DomainCount = entry.EntryCount
+		}
+		fmt.Printf("Generated %s with %d entries\n", entry.Asset, entry.EntryCount)
+	}
+	if err := sources.Close(); err != nil {
+		return fmt.Errorf("finish source archive: %w", err)
+	}
+	if err := tempArchive.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tempArchive.Name(), 0o644); err != nil {
+		return err
+	}
+	if err := os.Rename(tempArchive.Name(), filepath.Join(outputDir, sourceArchive)); err != nil {
+		return err
+	}
+	fmt.Fprintf(&checksums, "%s  %s\n", hex.EncodeToString(archiveHash.Sum(nil)), sourceArchive)
+
 	builtAt := time.Now().UTC()
 	buildNumber := os.Getenv("GITHUB_RUN_NUMBER")
 	if buildNumber == "" {
 		buildNumber = builtAt.Format("150405")
 	}
-	info := manifest{
-		Version:         "v" + builtAt.Format("20060102") + "." + buildNumber,
-		BuiltAt:         builtAt.Format(time.RFC3339),
-		GeneratorCommit: os.Getenv("GITHUB_SHA"),
-		SourceURL:       feed.SourceURL,
-		SourceVersion:   snapshot.Version,
-		SourceSHA256:    hex.EncodeToString(sourceHash[:]),
-		License:         "GPL-3.0-only",
-		Asset:           geosite.Filename,
-		AssetSHA256:     hex.EncodeToString(assetHash[:]),
-		Category:        geosite.Category,
-		DomainCount:     len(snapshot.Domains),
-	}
+	info.Version = "v" + builtAt.Format("20060102") + "." + buildNumber
+	info.BuiltAt = builtAt.Format(time.RFC3339)
+	info.GeneratorCommit = os.Getenv("GITHUB_SHA")
+	info.License = "GPL-3.0-only"
 	metadata, err := json.MarshalIndent(info, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode manifest: %w", err)
 	}
-
-	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+	if err := writeFile(outputDir, "checksums.sha256", []byte(checksums.String())); err != nil {
 		return err
 	}
-	files := []struct {
-		name string
-		data []byte
-	}{
-		{geosite.Filename, asset},
-		{geosite.Filename + ".sha256", []byte(fmt.Sprintf("%s  %s\n", info.AssetSHA256, info.Asset))},
-		{sourceFilename, snapshot.Raw},
-		{"manifest.json", append(metadata, '\n')},
+	if err := writeFile(outputDir, "manifest.json", append(metadata, '\n')); err != nil {
+		return err
 	}
-	for _, file := range files {
-		if err := writeFile(outputDir, file.name, file.data); err != nil {
-			return fmt.Errorf("write %s: %w", file.name, err)
+	fmt.Printf("Prepared %s with %d separate Xray packages\n", info.Version, len(info.Packages))
+	return nil
+}
+
+func buildPackage(ctx context.Context, client *http.Client, p feed.Package, outputDir string, sources *zip.Writer) (packageManifest, error) {
+	snapshot, err := feed.Download(ctx, client, p)
+	if err != nil {
+		return packageManifest{}, err
+	}
+	var encoded []byte
+	if p.Kind == feed.IP {
+		encoded, err = geosite.EncodeIPs(p.Tag, snapshot.Entries)
+	} else {
+		encoded, err = geosite.Encode(p.Tag, snapshot.Entries)
+	}
+	if err != nil {
+		return packageManifest{}, fmt.Errorf("encode package: %w", err)
+	}
+	assetHash := sha256.Sum256(encoded)
+	sourceHash := sha256.Sum256(snapshot.Raw)
+	entry := packageManifest{
+		Category:      p.Tag,
+		Kind:          p.Kind,
+		Policy:        p.Policy,
+		Asset:         p.Asset(),
+		AssetSHA256:   hex.EncodeToString(assetHash[:]),
+		SourceFile:    p.SourceFile(),
+		SourceURL:     p.SourceURL,
+		SourceVersion: snapshot.Version,
+		SourceSHA256:  hex.EncodeToString(sourceHash[:]),
+		EntryCount:    len(snapshot.Entries),
+	}
+
+	if err := writeFile(outputDir, entry.Asset, encoded); err != nil {
+		return packageManifest{}, err
+	}
+	member, err := sources.Create(entry.SourceFile)
+	if err != nil {
+		return packageManifest{}, err
+	}
+	if _, err := member.Write(snapshot.Raw); err != nil {
+		return packageManifest{}, err
+	}
+	if p.Tag == feed.MediumTag {
+		if err := writeFile(outputDir, "source-tif-medium.txt", snapshot.Raw); err != nil {
+			return packageManifest{}, err
+		}
+		checksum := fmt.Sprintf("%s  %s\n", entry.AssetSHA256, entry.Asset)
+		if err := writeFile(outputDir, entry.Asset+".sha256", []byte(checksum)); err != nil {
+			return packageManifest{}, err
 		}
 	}
-	fmt.Printf("Generated %s (%s) from HaGeZi %s with %d domains\n",
-		filepath.Join(outputDir, info.Asset), info.Version, info.SourceVersion, info.DomainCount)
-	return nil
+	return entry, nil
 }
 
 func writeFile(dir, name string, data []byte) error {
