@@ -1,0 +1,51 @@
+{
+  "log": {"loglevel": "warning"},
+  "inbounds": [
+    {
+      "tag": "test-vless",
+      "listen": "127.0.0.1",
+      "port": 21080,
+      "protocol": "vless",
+      "settings": {
+        "clients": [{"id": "ace235ec-a872-4e8e-970c-8a35cc77aa00"}],
+        "decryption": "none"
+      },
+      "streamSettings": {"network": "raw", "security": "none"}
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "DIRECT",
+      "protocol": "freedom",
+      "settings": {
+        "redirect": "127.0.0.1:21082",
+        "finalRules": [
+          {"action": "allow", "network": "tcp", "ip": ["127.0.0.1/32"], "port": "21082"},
+          {"action": "block", "network": "tcp,udp"}
+        ]
+      }
+    },
+    {
+      "tag": "ALLOW",
+      "protocol": "freedom",
+      "settings": {
+        "redirect": "127.0.0.1:21083",
+        "finalRules": [
+          {"action": "allow", "network": "tcp", "ip": ["127.0.0.1/32"], "port": "21083"},
+          {"action": "block", "network": "tcp,udp"}
+        ]
+      }
+    },
+    {
+      "tag": "BLOCK",
+      "protocol": "blackhole",
+      "settings": {"response": {"type": "http"}}
+    }
+  ],
+  "routing": {
+    "domainStrategy": "AsIs",
+    "rules": [
+      {"type": "field", "domain": ["ext:hagezi-tif.dat:tif-medium"], "outboundTag": "BLOCK"}
+    ]
+  }
+}

@@ -12,6 +12,16 @@ go run -mod=readonly ./cmd/geosite
 
 گردش‌کار [Update GeoSite](../.github/workflows/update.yml) هر روز ساعت ۰۳:۱۷ به وقت UTC اجرا می‌شود. برای اجرای دستی، در **Actions → Update GeoSite → Run workflow** شاخهٔ پیش‌فرض را انتخاب کنید. در مخزن جدید، گردش‌کار باید روی شاخهٔ پیش‌فرض موجود باشد و اجازهٔ نوشتن در مخزن را داشته باشد. گیت‌هاب ممکن است زمان‌بندی مخزن عمومی بدون فعالیت را متوقف کند. [راهنمای زمان‌بندی GitHub Actions](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)
 
+## بررسی پیش از انتشار
+
+پس از ساخت فایل‌ها، دستور زیر را با Python نسخهٔ ۳٫۱۱ یا بالاتر اجرا کنید.
+
+```sh
+python -B tests/xray-core/run.py
+```
+
+گردش‌کار خروجی را با آخرین نسخهٔ پایدار Xray کاملاً روی loopback بررسی می‌کند. انتشار فقط پس از موفقیت تست‌های همان خروجی انجام می‌شود. گزارش در خلاصهٔ اجرا و بخش **Artifacts** گیت‌هاب در دسترس است. [راهنمای تست و نمونه‌های کلاینت و سرور](../tests/xray-core/README.md)
+
 ## شمارهٔ نسخه و خروجی
 
 شمارهٔ نسخه در Actions قالب `vYYYYMMDD.N` دارد. بخش تاریخ بر اساس UTC و `N` شمارهٔ اجرای گردش‌کار است. ساخت محلی به‌جای شمارهٔ اجرا از ساعت ساخت به قالب `HHMMSS` استفاده می‌کند.

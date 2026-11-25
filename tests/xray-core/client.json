@@ -1,0 +1,25 @@
+{
+  "log": {"loglevel": "warning"},
+  "inbounds": [
+    {
+      "tag": "local-socks",
+      "listen": "127.0.0.1",
+      "port": 21081,
+      "protocol": "socks",
+      "settings": {"auth": "noauth"}
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "test-server",
+      "protocol": "vless",
+      "settings": {
+        "address": "127.0.0.1",
+        "port": 21080,
+        "id": "ace235ec-a872-4e8e-970c-8a35cc77aa00",
+        "encryption": "none"
+      },
+      "streamSettings": {"network": "raw", "security": "none"}
+    }
+  ]
+}

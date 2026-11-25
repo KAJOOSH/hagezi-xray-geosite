@@ -9,6 +9,20 @@ ref="refs/heads/$branch"
 publish_dir=$(mktemp -d)
 trap 'git worktree remove --force "$publish_dir" >/dev/null 2>&1 || rmdir "$publish_dir"' EXIT
 
+report_file=${2:?Pass the successful Xray integration report}
+manifest_digest=$(sha256sum "$artifact_dir/manifest.json" | cut -d ' ' -f 1)
+if ! jq -e --arg digest "$manifest_digest" --slurpfile candidate "$artifact_dir/manifest.json" '
+    .failed == 0 and .passed > 0
+    and .manifest_sha256 == $digest
+    and .geodata_version == $candidate[0].version
+    and .package_count == ($candidate[0].packages | length)
+    and (.xray_version | type == "string")
+' "$report_file" >/dev/null; then
+    echo 'A passing Xray integration report for this exact candidate is required.' >&2
+    exit 1
+fi
+xray_version=$(jq -er '.xray_version' "$report_file")
+
 (cd "$artifact_dir" && sha256sum --check checksums.sha256)
 
 gh auth setup-git --hostname github.com
@@ -94,8 +108,10 @@ if release=$(gh release view "$version" --repo "$GITHUB_REPOSITORY" --json isDra
     fi
 else
     readme_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/$generator_commit/README.md"
-    packages_url="$readme_url#packages"
-    notes=$(printf 'زمان ساخت به وقت UTC `%s`.\n\n[راهنمای استفاده در Xray](%s) · [فهرست بسته‌ها و راهنمای انتخاب](%s)\n' "$built_at" "$readme_url" "$packages_url")
+    persian_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/$generator_commit/README.fa.md"
+    test_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+    notes=$(printf 'Built on `%s` (UTC). Validated with Xray-core `%s`.\n\n[Usage and package list](%s) · [Persian guide](%s) · [Integration results](%s)\n' \
+        "$built_at" "$xray_version" "$readme_url" "$persian_url" "$test_url")
     gh release create "$version" "${assets[@]}" --repo "$GITHUB_REPOSITORY" \
         --target "$generator_commit" --latest --title "HaGeZi GeoSite and GeoIP $version" --notes "$notes"
 fi
