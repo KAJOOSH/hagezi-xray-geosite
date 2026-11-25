@@ -9,10 +9,6 @@ ref="refs/heads/$branch"
 publish_dir=$(mktemp -d)
 trap 'git worktree remove --force "$publish_dir" >/dev/null 2>&1 || rmdir "$publish_dir"' EXIT
 
-cd "$artifact_dir"
-sha256sum --check hagezi-tif.dat.sha256
-cd - >/dev/null
-
 gh auth setup-git --hostname github.com
 if git ls-remote --exit-code origin "$ref" >/dev/null; then
     git fetch --no-tags --depth=1 origin "$ref"
@@ -27,21 +23,68 @@ else
 fi
 
 files=(hagezi-tif.dat hagezi-tif.dat.sha256 source-tif-medium.txt manifest.json LICENSE)
+manifest="$publish_dir/manifest.json"
+new_snapshot=false
+if [[ -f "$manifest" ]] && jq -e --slurpfile candidate "$artifact_dir/manifest.json" '
+    (.version | type == "string")
+    and .source_sha256 == $candidate[0].source_sha256
+    and .asset_sha256 == $candidate[0].asset_sha256
+' "$manifest" >/dev/null; then
+    echo 'The generated branch already contains this version.'
+else
+    new_snapshot=true
+    for file in "${files[@]}"; do
+        source="$artifact_dir/$file"
+        if [[ "$file" == LICENSE ]]; then
+            source=LICENSE
+        fi
+        install -m 0644 "$source" "$publish_dir/$file"
+    done
+fi
+
+version=$(jq -er '.version' "$manifest")
+built_at=$(jq -er '.built_at' "$manifest")
+generator_commit=$(jq -er '.generator_commit' "$manifest")
+asset_sha256=$(jq -er '.asset_sha256' "$manifest")
+source_sha256=$(jq -er '.source_sha256' "$manifest")
+if [[ ! "$version" =~ ^v[0-9]{8}\.[0-9]+$ || ! "$generator_commit" =~ ^[0-9a-f]{40}$ ||
+    ! "$built_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ||
+    ! "$asset_sha256" =~ ^[0-9a-f]{64}$ || ! "$source_sha256" =~ ^[0-9a-f]{64}$ ]]; then
+    echo 'Invalid metadata for the generated version.' >&2
+    exit 1
+fi
+
+(
+    cd "$publish_dir"
+    sha256sum --check hagezi-tif.dat.sha256
+    printf '%s  hagezi-tif.dat\n%s  source-tif-medium.txt\n' "$asset_sha256" "$source_sha256" | sha256sum --check
+)
+
+converter_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/tree/$generator_commit"
+if [[ "$new_snapshot" == true ]]; then
+    git -C "$publish_dir" add -- "${files[@]}"
+    git -C "$publish_dir" -c user.name='github-actions[bot]' \
+        -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+        commit -m "Publish GeoSite $version ($built_at)" -m "Converter: $converter_url"
+    git -C "$publish_dir" push origin "HEAD:$ref"
+fi
+
+assets=()
 for file in "${files[@]}"; do
-    source="$artifact_dir/$file"
-    if [[ "$file" == LICENSE ]]; then
-        source=LICENSE
-    fi
-    install -m 0644 "$source" "$publish_dir/$file"
+    assets+=("$publish_dir/$file")
 done
 
-git -C "$publish_dir" add -- "${files[@]}"
-if git -C "$publish_dir" diff --cached --quiet; then
-    echo 'Published files are up to date.'
-    exit 0
+if release=$(gh release view "$version" --repo "$GITHUB_REPOSITORY" --json isDraft,assets,url 2>/dev/null); then
+    if [[ $(jq -r '.isDraft' <<< "$release") == true ]]; then
+        gh release upload "$version" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+        gh release edit "$version" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+    else
+        jq -e 'any(.assets[]; .name == "hagezi-tif.dat")' <<< "$release" >/dev/null
+        printf 'Release %s already published: %s\n' "$version" "$(jq -r '.url' <<< "$release")"
+    fi
+else
+    readme_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/$generator_commit/README.md"
+    notes=$(printf 'زمان ساخت به وقت UTC `%s`.\n\n[راهنمای استفاده در Xray](%s)\n' "$built_at" "$readme_url")
+    gh release create "$version" "${assets[@]}" --repo "$GITHUB_REPOSITORY" \
+        --target "$generator_commit" --latest --title "HaGeZi TIF Medium $version" --notes "$notes"
 fi
-git -C "$publish_dir" -c user.name='github-actions[bot]' \
-    -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
-    commit -m "Update HaGeZi TIF Medium ($(date -u +%F))" \
-    -m "Converter: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/tree/$GITHUB_SHA"
-git -C "$publish_dir" push origin "HEAD:$ref"

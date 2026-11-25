@@ -32,7 +32,7 @@ jobs:
       - name: Download and convert the list
         run: go run -mod=readonly ./cmd/geosite
 
-      - name: Publish files to the generated branch
+      - name: Publish versioned GeoSite
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash scripts/publish.sh dist

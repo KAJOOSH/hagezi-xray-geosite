@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"time"
 
 	"hagezi-xray-geosite/internal/feed"
 	"hagezi-xray-geosite/internal/geosite"
@@ -21,14 +22,17 @@ import (
 const sourceFilename = "source-tif-medium.txt"
 
 type manifest struct {
-	SourceURL     string `json:"source_url"`
-	SourceVersion string `json:"source_version"`
-	SourceSHA256  string `json:"source_sha256"`
-	License       string `json:"license"`
-	Asset         string `json:"asset"`
-	AssetSHA256   string `json:"asset_sha256"`
-	Category      string `json:"category"`
-	DomainCount   int    `json:"domain_count"`
+	Version         string `json:"version"`
+	BuiltAt         string `json:"built_at"`
+	GeneratorCommit string `json:"generator_commit,omitempty"`
+	SourceURL       string `json:"source_url"`
+	SourceVersion   string `json:"source_version"`
+	SourceSHA256    string `json:"source_sha256"`
+	License         string `json:"license"`
+	Asset           string `json:"asset"`
+	AssetSHA256     string `json:"asset_sha256"`
+	Category        string `json:"category"`
+	DomainCount     int    `json:"domain_count"`
 }
 
 func main() {
@@ -57,15 +61,23 @@ func generate(ctx context.Context, outputDir string) error {
 
 	assetHash := sha256.Sum256(asset)
 	sourceHash := sha256.Sum256(snapshot.Raw)
+	builtAt := time.Now().UTC()
+	buildNumber := os.Getenv("GITHUB_RUN_NUMBER")
+	if buildNumber == "" {
+		buildNumber = builtAt.Format("150405")
+	}
 	info := manifest{
-		SourceURL:     feed.SourceURL,
-		SourceVersion: snapshot.Version,
-		SourceSHA256:  hex.EncodeToString(sourceHash[:]),
-		License:       "GPL-3.0-only",
-		Asset:         geosite.Filename,
-		AssetSHA256:   hex.EncodeToString(assetHash[:]),
-		Category:      geosite.Category,
-		DomainCount:   len(snapshot.Domains),
+		Version:         "v" + builtAt.Format("20060102") + "." + buildNumber,
+		BuiltAt:         builtAt.Format(time.RFC3339),
+		GeneratorCommit: os.Getenv("GITHUB_SHA"),
+		SourceURL:       feed.SourceURL,
+		SourceVersion:   snapshot.Version,
+		SourceSHA256:    hex.EncodeToString(sourceHash[:]),
+		License:         "GPL-3.0-only",
+		Asset:           geosite.Filename,
+		AssetSHA256:     hex.EncodeToString(assetHash[:]),
+		Category:        geosite.Category,
+		DomainCount:     len(snapshot.Domains),
 	}
 	metadata, err := json.MarshalIndent(info, "", "  ")
 	if err != nil {
@@ -89,8 +101,8 @@ func generate(ctx context.Context, outputDir string) error {
 			return fmt.Errorf("write %s: %w", file.name, err)
 		}
 	}
-	fmt.Printf("Generated %s from HaGeZi %s with %d domains\n",
-		filepath.Join(outputDir, info.Asset), info.SourceVersion, info.DomainCount)
+	fmt.Printf("Generated %s (%s) from HaGeZi %s with %d domains\n",
+		filepath.Join(outputDir, info.Asset), info.Version, info.SourceVersion, info.DomainCount)
 	return nil
 }
 
